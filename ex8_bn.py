@@ -122,24 +122,32 @@ def make_parser():
         default=histories_path
     )
 
-    parser_explore = subparsers.add_parser(
+    parser_search = subparsers.add_parser(
         "search",
         help="Search for the optimal learning rate in a specified interval."
     )
 
-    parser_explore.add_argument(
+    parser_search.add_argument(
         "from",
         type=float,
         help="The left end of search interval."
     )
 
-    parser_explore.add_argument(
+    parser_search.add_argument(
         "to",
         type=float,
         help="The right end of search interval."
     )
 
-    parser_explore.add_argument(
+    parser_search.add_argument(
+        "-s",
+        "--steps",
+        type=int,
+        default=10,
+        help="Number of steps in the search interval."
+    )
+
+    parser_search.add_argument(
         "-o",
         "--output",
         default=histories_path
@@ -147,28 +155,39 @@ def make_parser():
 
     return parser
 
-# rates = np.geomspace(1e-6, 1, 10)
-# histories = []
-# for learning_rate in rates:
-#     # FIXME: spawn another process for this, because this shit keeps dying
-#     # all the time
-
-#     histories.append((learning_rate, history.history))
-
-#     K.clear_session()
-
-# with open("histories.p", "wb") as f:
-#     pickle.dump(histories, f)
-
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args()
 
     if hasattr(args, "rate"):
-        model = make_model()
-        history, test_loss, test_acc = train_model(model, args.rate)
+        model = make_model(input_shape=(32, 32, 3))
+        history, _, _ = train_model(model, args.rate)
+        val_loss = min(history.history["val_loss"])
+        val_acc = max(history.history["val_accuracy"])
+
+        try:
+            with open(args.output, "rb") as f:
+                histories = pickle.load(f)
+        except:
+            print("ACHTUNG! Cannot load histories, overwriting!")
+            histories = {}
+
+        histories[args.rate] = { "val_loss": val_loss, "val_accuracy": val_acc }
 
         with open(args.output, "wb") as f:
+            pickle.dump(histories, f)
+
+    elif hasattr(args, "from"):
+        rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
+        for rate in rates:
+            print(f"Training with learning rate {rate}")
+
+            # start a new python process for each rate
+            os.system(f"python {__file__} train {rate}")
+
+        with open(args.output, "rb") as f:
             histories = pickle.load(f)
+            print(histories.keys())
+
     else:
-        print("SEARCH")
+        parser.print_help()
