@@ -1,3 +1,4 @@
+from datetime import datetime
 from keras.datasets import cifar10
 from tensorflow import keras
 import argparse
@@ -10,7 +11,6 @@ import pickle
 # - add a command to plot the learning curves
 # - add option to choose a linear or a geometric search space
 # - log subprocess output to file instead of stdout
-# - add a timestamp to the history file
 
 # basepath for all the serialized data and logs
 basepath = os.path.abspath(
@@ -22,7 +22,13 @@ basepath = os.path.abspath(
 weights_path = os.path.join(basepath, "tf_models", "cifair10_weigths.h5")
 root_logdir = os.path.join(basepath, "tf_logs")
 model_path = os.path.join(basepath, "tf_models", "cifair10_model.h5")
-histories_path = os.path.join(basepath, "tf_models", "histories.p")
+
+def histories_path():
+    return os.path.join(
+        basepath,
+        "tf_models",
+        "histories.{timestamp}.p".format(timestamp=datetime.now().timestamp())
+    )
 
 def load_cifair10():
     "Import CIFAIR10 dataset and split into train, validation and test sets."
@@ -91,7 +97,7 @@ def make_parser():
     parser.add_argument(
         "-o",
         "--output",
-        default=histories_path,
+        default=histories_path(),
         help="The path to the file to save the histories to."
     )
 
@@ -170,7 +176,7 @@ if __name__ == "__main__":
             print(f"Training with learning rate {rate}")
 
             # start a new python process for each rate
-            os.system(f"python {__file__} {args.model_path} train {rate}")
+            os.system(f"python {__file__} {args.model_path} -o {args.output} train {rate}")
 
         with open(args.output, "rb") as f:
             histories = pickle.load(f)
