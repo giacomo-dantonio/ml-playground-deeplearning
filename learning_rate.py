@@ -1,12 +1,16 @@
+from keras.datasets import cifar10
+from tensorflow import keras
 import argparse
 import keras.backend as K
 import numpy as np
 import os
 import pickle
-from parso import parse
 
-from tensorflow import keras
-from keras.datasets import cifar10
+# TODO
+# - add a command to plot the learning curves
+# - add option to choose a linear or a geometric search space
+# - log subprocess output to file instead of stdout
+# - add a timestamp to the history file
 
 # basepath for all the serialized data and logs
 basepath = os.path.abspath(
@@ -49,30 +53,7 @@ def make_callbacks():
     return (earlystopping_cb, tensorboard_cb, model_checkpoint_cb)
 
 
-# input_shape = X_train.shape[1:]
-def make_model(input_shape):
-    "Create a model with batch normalization."
-    layers = [keras.layers.Flatten(input_shape=input_shape)]
-    for _ in range(20):
-        layers.append(keras.layers.BatchNormalization())
-        layers.append(keras.layers.Dense(100, activation="elu", kernel_initializer="he_normal"))
-    layers.append(keras.layers.BatchNormalization())
-    layers.append(keras.layers.Dense(10, activation="softmax"))
-
-    model = keras.models.Sequential(layers)
-
-    model.compile(
-        loss="sparse_categorical_crossentropy",
-        optimizer=keras.optimizers.Nadam(),
-        metrics=["accuracy"]
-    )
-
-    model.save_weights(weights_path)
-
-    return model
-
-
-def train_model(model, learning_rate):
+def train_model(model, learning_rate, weights_path):
     "Train the model with a given learning rate and return the history."
 
     (earlystopping_cb, tensorboard_cb, model_checkpoint_cb) = make_callbacks()
@@ -102,6 +83,24 @@ def make_parser():
             "for the CIFAIR10 dataset."
     )
 
+    parser.add_argument(
+        "model_path",
+        help="The path to the keras model to explore, as an HDF5 file."
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=histories_path,
+        help="The path to the file to save the histories to."
+    )
+
+    parser.add_argument(
+        "--weights_path",
+        default=weights_path,
+        help="The path to the file to save the weights to."
+    )
+
     subparsers = parser.add_subparsers()
 
     parser_train = subparsers.add_parser(
@@ -114,12 +113,6 @@ def make_parser():
         "rate",
         type=float,
         help="The learning rate to train the model with."
-    )
-
-    parser_train.add_argument(
-        "-o",
-        "--output",
-        default=histories_path
     )
 
     parser_search = subparsers.add_parser(
@@ -147,12 +140,6 @@ def make_parser():
         help="Number of steps in the search interval."
     )
 
-    parser_search.add_argument(
-        "-o",
-        "--output",
-        default=histories_path
-    )
-
     return parser
 
 if __name__ == "__main__":
@@ -160,8 +147,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if hasattr(args, "rate"):
-        model = make_model(input_shape=(32, 32, 3))
-        history, _, _ = train_model(model, args.rate)
+        model = keras.models.load_model(args.model_path)
+        history, _, _ = train_model(model, args.rate, weights_path=args.weights_path)
         val_loss = min(history.history["val_loss"])
         val_acc = max(history.history["val_accuracy"])
 
@@ -183,7 +170,7 @@ if __name__ == "__main__":
             print(f"Training with learning rate {rate}")
 
             # start a new python process for each rate
-            os.system(f"python {__file__} train {rate}")
+            os.system(f"python {__file__} {args.model_path} train {rate}")
 
         with open(args.output, "rb") as f:
             histories = pickle.load(f)
