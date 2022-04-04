@@ -3,12 +3,12 @@ from keras.datasets import cifar10
 from tensorflow import keras
 import argparse
 import keras.backend as K
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
 
 # TODO
-# - add a command to plot the learning curves
 # - add option to choose a linear or a geometric search space
 # - log subprocess output to file instead of stdout
 
@@ -82,6 +82,20 @@ def train_model(model, learning_rate, weights_path):
     return history, test_loss, test_acc
 
 
+def plot_histories(histories, height, width, filename):
+    rates = [rate for rate in histories.keys() if rate != 1e-5]
+    losses = [histories[rate]["val_loss"] for rate in rates]
+    accuracies = [histories[rate]["val_accuracy"] for rate in rates]
+
+        # plot the loss and the accuracy against the rates
+    plt.figure(figsize=(width, height))
+    plt.plot(rates, losses, label="loss")
+    plt.plot(rates, accuracies, label="accuracy")
+    plt.legend()
+
+    plt.savefig(filename)
+
+
 def make_parser():
     parser = argparse.ArgumentParser(
         description=
@@ -146,41 +160,90 @@ def make_parser():
         help="Number of steps in the search interval."
     )
 
+    parser_plot = subparsers.add_parser(
+        "plot",
+        help="Plot the learning curves of the model."
+    )
+
+    parser_plot.add_argument(
+        "--width",
+        default=20,
+        type=int,
+        help="The width of the plot."
+    )
+
+    parser_plot.add_argument(
+        "--height",
+        default=9,
+        type=int,
+        help="The height of the plot."
+    )
+
+    parser_plot.add_argument(
+        "-f",
+        "--filename",
+        default="plot.png",
+        help="The path to the file to save the plot to."
+    )
+
     return parser
+
+
+def exec_train(args):
+    model = keras.models.load_model(args.model_path)
+    history, _, _ = train_model(model, args.rate, weights_path=args.weights_path)
+    val_loss = min(history.history["val_loss"])
+    val_acc = max(history.history["val_accuracy"])
+
+    try:
+        with open(args.output, "rb") as f:
+            histories = pickle.load(f)
+    except:
+        print("ACHTUNG! Cannot load histories, overwriting!")
+        histories = {}
+
+    histories[args.rate] = { "val_loss": val_loss, "val_accuracy": val_acc }
+
+    with open(args.output, "wb") as f:
+        pickle.dump(histories, f)
+
+
+def exec_search(args):
+    rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
+    for rate in rates:
+        print(f"Training with learning rate {rate}")
+
+            # start a new python process for each rate
+        os.system(f"python {__file__} {args.model_path} -o {args.output} train {rate}")
+
+    with open(args.output, "rb") as f:
+        histories = pickle.load(f)
+        print(histories.keys())
+
+
+def exec_plot(args):
+    try:
+        with open(args.output, "rb") as f:
+            histories = pickle.load(f)
+
+        plot_histories(histories, args.width, args.height, args.filename)
+    except:
+        # FIXME: log error
+        print("ACHTUNG! Cannot load histories, aborting!")
+
 
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args()
 
     if hasattr(args, "rate"):
-        model = keras.models.load_model(args.model_path)
-        history, _, _ = train_model(model, args.rate, weights_path=args.weights_path)
-        val_loss = min(history.history["val_loss"])
-        val_acc = max(history.history["val_accuracy"])
-
-        try:
-            with open(args.output, "rb") as f:
-                histories = pickle.load(f)
-        except:
-            print("ACHTUNG! Cannot load histories, overwriting!")
-            histories = {}
-
-        histories[args.rate] = { "val_loss": val_loss, "val_accuracy": val_acc }
-
-        with open(args.output, "wb") as f:
-            pickle.dump(histories, f)
+        exec_train(args)
 
     elif hasattr(args, "from"):
-        rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
-        for rate in rates:
-            print(f"Training with learning rate {rate}")
+        exec_search(args)
 
-            # start a new python process for each rate
-            os.system(f"python {__file__} {args.model_path} -o {args.output} train {rate}")
-
-        with open(args.output, "rb") as f:
-            histories = pickle.load(f)
-            print(histories.keys())
+    elif hasattr(args, "filename"):
+        exec_plot(args)
 
     else:
         parser.print_help()
