@@ -1,16 +1,23 @@
-from datetime import datetime
-from keras.datasets import cifar10
-from tensorflow import keras
 import argparse
 import keras.backend as K
+import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
+import subprocess
+
+from datetime import datetime
+from keras.datasets import cifar10
+from tensorflow import keras
+
+logger = logging.getLogger(__name__)
 
 # TODO
 # - add option to choose a linear or a geometric search space
-# - log subprocess output to file instead of stdout
+# - Improve logging of subprocesses
+# - write README
+# - add documentation
 
 # basepath for all the serialized data and logs
 basepath = os.path.abspath(
@@ -96,6 +103,11 @@ def plot_histories(histories, height, width, filename):
     plt.savefig(filename)
 
 
+def log_subprocess_output(subprocess_logger, pipe, level):
+    for line in iter(pipe.readline, b''): # b'\n'-separated lines
+        logging.log(level, line)
+
+
 def make_parser():
     parser = argparse.ArgumentParser(
         description=
@@ -119,6 +131,13 @@ def make_parser():
         "--weights_path",
         default=weights_path,
         help="The path to the file to save the weights to."
+    )
+
+    parser.add_argument(
+        "-v",
+        "---verbose",
+        action="store_true",
+        help="Display verbose information on stdout."
     )
 
     subparsers = parser.add_subparsers()
@@ -199,7 +218,7 @@ def exec_train(args):
         with open(args.output, "rb") as f:
             histories = pickle.load(f)
     except:
-        print("ACHTUNG! Cannot load histories, overwriting!")
+        logging.warn("Cannot load histories, overwriting!")
         histories = {}
 
     histories[args.rate] = { "val_loss": val_loss, "val_accuracy": val_acc }
@@ -211,14 +230,34 @@ def exec_train(args):
 def exec_search(args):
     rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
     for rate in rates:
-        print(f"Training with learning rate {rate}")
+        logging.info(f"Training with learning rate {rate}")
 
-            # start a new python process for each rate
-        os.system(f"python {__file__} {args.model_path} -o {args.output} train {rate}")
+        # start a new python process for each rate
+        cli_args = [
+            "python", __file__,
+            args.model_path, "-o", args.output,
+            "train", "%s" % rate
+        ]
+
+        subp = subprocess.Popen(
+            cli_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+
+        subprocess_logger = logging.getLogger(
+            "{0} subprocess {1}".format(__name__, subp.pid))
+
+        with subp.stdout:
+            log_subprocess_output(subprocess_logger, subp.stdout, logging.INFO)
+
+        with subp.stderr:
+            log_subprocess_output(subprocess_logger, subp.stderr, logging.ERROR)
+
+        subp.wait()
 
     with open(args.output, "rb") as f:
         histories = pickle.load(f)
-        print(histories.keys())
+        logging.debug("History keys: {0}", histories.keys())
 
 
 def exec_plot(args):
@@ -228,13 +267,17 @@ def exec_plot(args):
 
         plot_histories(histories, args.width, args.height, args.filename)
     except:
-        # FIXME: log error
-        print("ACHTUNG! Cannot load histories, aborting!")
+        logger.error("Cannot load histories, aborting!")
 
 
 if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args()
+
+    logging.basicConfig(
+        format='%(levelname)s\t%(message)s',
+        level=logging.INFO if args.verbose else logging.WARNING
+    )
 
     if hasattr(args, "rate"):
         exec_train(args)
