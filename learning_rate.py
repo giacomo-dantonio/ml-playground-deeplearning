@@ -14,7 +14,9 @@ from tensorflow import keras
 logger = logging.getLogger(__name__)
 
 # TODO
+# - load dataset from file
 # - add option to choose a linear or a geometric search space
+# - split the code in submodules
 # - write README
 # - add documentation
 
@@ -80,7 +82,8 @@ def train_model(model, learning_rate, weights_path):
         X_train, y_train,
         epochs=10,
         validation_data=(X_valid, y_valid),
-        callbacks=[tensorboard_cb]
+        callbacks=[tensorboard_cb],
+        verbose=2
         # callbacks=[tensorboard_cb, model_checkpoint_cb, earlystopping_cb]
     )
 
@@ -104,7 +107,7 @@ def plot_histories(histories, height, width, filename):
 
 def log_subprocess_output(subprocess_logger, pipe, level):
     for line in iter(pipe.readline, b''): # b'\n'-separated lines
-        logging.log(level, line)
+        logging.log(level, line.decode("utf-8").strip())
 
 
 def make_parser():
@@ -184,6 +187,19 @@ def make_parser():
         help="Number of steps in the search interval."
     )
 
+    parser_search.add_argument(
+        "--linear",
+        action="store_true",
+        help="If set the a linear space between `from` and `to` is used. "
+            "Otherwise a geometric space is used."
+    )
+
+    parser_search.add_argument(
+        "--hide_train_output",
+        action="store_true",
+        help="Set the flag to prevent output of the training subprocesses from being logged."
+    )
+
     parser_plot = subparsers.add_parser(
         "plot",
         help="Plot the learning curves of the model."
@@ -233,7 +249,15 @@ def exec_train(args):
 
 
 def exec_search(args):
-    rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
+
+    if args.linear:
+        logger.info("Searching a linear space between %f and %f", getattr(args, "from"), args.to)
+        rates = np.linspace(getattr(args, "from"), args.to, args.steps)
+    else:
+        logger.info("Searching a geometric space between %f and %f", getattr(args, "from"), args.to)
+        rates = np.geomspace(getattr(args, "from"), args.to, args.steps)
+
+
     for rate in rates:
         logging.info(f"Training with learning rate {rate}")
 
@@ -249,15 +273,16 @@ def exec_search(args):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT)
 
-        subprocess_logger = logging.getLogger(
-            "{0} subprocess {1}".format(__name__, subp.pid))
-        if subp.stdout is not None:
-            with subp.stdout:
-                log_subprocess_output(subprocess_logger, subp.stdout, logging.INFO)
+        if not args.hide_train_output:
+            subprocess_logger = logging.getLogger(
+                "{0} subprocess {1}".format(__name__, subp.pid))
+            if subp.stdout is not None:
+                with subp.stdout:
+                    log_subprocess_output(subprocess_logger, subp.stdout, logging.INFO)
 
-        if subp.stderr is not None:
-            with subp.stderr:
-                log_subprocess_output(subprocess_logger, subp.stderr, logging.ERROR)
+            if subp.stderr is not None:
+                with subp.stderr:
+                    log_subprocess_output(subprocess_logger, subp.stderr, logging.ERROR)
 
         subp.wait()
 
