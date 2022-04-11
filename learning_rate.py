@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 # TODO
 # - add option to choose a linear or a geometric search space
-# - Improve logging of subprocesses
 # - write README
 # - add documentation
 
@@ -135,9 +134,15 @@ def make_parser():
 
     parser.add_argument(
         "-v",
-        "---verbose",
+        "--verbose",
         action="store_true",
         help="Display verbose information on stdout."
+    )
+
+    parser.add_argument(
+        "-l",
+        "--logfile",
+        help="The path to the logfile to write to."
     )
 
     subparsers = parser.add_subparsers()
@@ -218,7 +223,7 @@ def exec_train(args):
         with open(args.output, "rb") as f:
             histories = pickle.load(f)
     except:
-        logging.warn("Cannot load histories, overwriting!")
+        logging.warning("Cannot load histories, overwriting!")
         histories = {}
 
     histories[args.rate] = { "val_loss": val_loss, "val_accuracy": val_acc }
@@ -246,12 +251,13 @@ def exec_search(args):
 
         subprocess_logger = logging.getLogger(
             "{0} subprocess {1}".format(__name__, subp.pid))
+        if subp.stdout is not None:
+            with subp.stdout:
+                log_subprocess_output(subprocess_logger, subp.stdout, logging.INFO)
 
-        with subp.stdout:
-            log_subprocess_output(subprocess_logger, subp.stdout, logging.INFO)
-
-        with subp.stderr:
-            log_subprocess_output(subprocess_logger, subp.stderr, logging.ERROR)
+        if subp.stderr is not None:
+            with subp.stderr:
+                log_subprocess_output(subprocess_logger, subp.stderr, logging.ERROR)
 
         subp.wait()
 
@@ -278,6 +284,11 @@ if __name__ == "__main__":
         format='%(levelname)s\t%(message)s',
         level=logging.INFO if args.verbose else logging.WARNING
     )
+
+    if args.logfile:
+        # create a file handler to log to the file
+        file_handler = logging.FileHandler(args.logfile)
+        logging.root.addHandler(file_handler)
 
     if hasattr(args, "rate"):
         exec_train(args)
