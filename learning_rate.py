@@ -1,5 +1,6 @@
 import argparse
 import keras.backend as K
+import h5py
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,13 +9,11 @@ import pickle
 import subprocess
 
 from datetime import datetime
-from keras.datasets import cifar10
 from tensorflow import keras
 
 logger = logging.getLogger(__name__)
 
 # TODO
-# - load dataset from file
 # - add option to choose a linear or a geometric search space
 # - split the code in submodules
 # - write README
@@ -38,16 +37,6 @@ def histories_path():
         "histories.{timestamp}.p".format(timestamp=datetime.now().timestamp())
     )
 
-def load_cifair10():
-    "Import CIFAIR10 dataset and split into train, validation and test sets."
-    data = cifar10.load_data()
-    (X_train_full, y_train_full), (X_test, y_test) = data
-    X_valid, X_train = X_train_full[:5000] / 255.0, X_train_full[5000:] / 255.0
-    y_valid, y_train = y_train_full[:5000], y_train_full[5000:]
-    X_test = X_test / 255.0
-    
-    return (X_train, y_train, X_valid, y_valid, X_test, y_test)
-
 
 def make_callbacks():
     "Create callbacks for the model."
@@ -67,11 +56,23 @@ def make_callbacks():
     return (earlystopping_cb, tensorboard_cb, model_checkpoint_cb)
 
 
-def train_model(model, learning_rate, weights_path):
+def load_dataset(filepath):
+    with h5py.File(filepath, "r") as f:
+        X_train = f["X_train"][:]
+        y_train = f["y_train"][:]
+        X_val = f["X_val"][:]
+        y_val = f["y_val"][:]
+        X_test = f["X_test"][:]
+        y_test = f["y_test"][:]
+
+    return (X_train, y_train, X_val, y_val, X_test, y_test)
+
+
+def train_model(model, dataset, learning_rate, weights_path):
     "Train the model with a given learning rate and return the history."
 
     (earlystopping_cb, tensorboard_cb, model_checkpoint_cb) = make_callbacks()
-    (X_train, y_train, X_valid, y_valid, X_test, y_test) = load_cifair10()
+    (X_train, y_train, X_valid, y_valid, X_test, y_test) = dataset
 
     # reset initial weights
     model.load_weights(weights_path)
@@ -115,6 +116,11 @@ def make_parser():
         description=
             "Train a deep neural network with the Tensorflow Keras API "
             "for the CIFAIR10 dataset."
+    )
+
+    parser.add_argument(
+        "data_path",
+        help="The path to the dataset."
     )
 
     parser.add_argument(
@@ -231,7 +237,9 @@ def make_parser():
 
 def exec_train(args):
     model = keras.models.load_model(args.model_path)
-    history, _, _ = train_model(model, args.rate, weights_path=args.weights_path)
+    dataset = load_dataset(args.data_path)
+
+    history, _, _ = train_model(model, dataset, args.rate, weights_path=args.weights_path)
     val_loss = min(history.history["val_loss"])
     val_acc = max(history.history["val_accuracy"])
 
@@ -249,7 +257,6 @@ def exec_train(args):
 
 
 def exec_search(args):
-
     if args.linear:
         logger.info("Searching a linear space between %f and %f", getattr(args, "from"), args.to)
         rates = np.linspace(getattr(args, "from"), args.to, args.steps)
@@ -264,7 +271,8 @@ def exec_search(args):
         # start a new python process for each rate
         cli_args = [
             "python", __file__,
-            args.model_path, "-o", args.output,
+            args.data_path, args.model_path,
+            "-o", args.output,
             "train", "%s" % rate
         ]
 
